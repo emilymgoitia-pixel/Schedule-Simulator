@@ -26,6 +26,19 @@ PHASE_ORDER = [
     "Tenant Fitout",
 ]
 
+CADC_ROLLUP_MAP = {
+    "Design": "Phase 3A",
+    "Permitting": "Phase 3A",
+    "Site Power": "Power",
+    "OFCI Procurement": "OFCI Production",
+    "Civil": "Phase 3B",
+    "Shell": "Phase 3B",
+    "Equipment Yard": "Phase 3B",
+    "MEP Fitup": "Phase 3B",
+    "Commissioning": "Phase 3B",
+    "Tenant Fitout": "Phase 4",
+}
+
 KPI_MILESTONES = [
     "Civil Complete",
     "Shell Complete",
@@ -62,7 +75,6 @@ def build_gantt(current_df: pd.DataFrame) -> go.Figure:
     df = df.sort_values("Phase", ascending=False)
 
     fig = go.Figure()
-
     fig.add_trace(
         go.Bar(
             x=(df["Finish"] - df["Start"]).dt.days,
@@ -79,14 +91,8 @@ def build_gantt(current_df: pd.DataFrame) -> go.Figure:
         )
     )
 
-    today = pd.Timestamp.today().normalize()
-    fig.add_vline(
-        x=today,
-        line_dash="dash",
-        annotation_text="Today",
-        annotation_position="top"
-    )
-
+    today = pd.Timestamp.today().normalize().to_pydatetime()
+    fig.add_vline(x=today, line_dash="dash", annotation_text="Today", annotation_position="top")
     fig.update_layout(
         barmode="overlay",
         height=max(450, len(df) * 36),
@@ -99,26 +105,31 @@ def build_gantt(current_df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-# session state
+def add_cadc_rollups(phases_calc: pd.DataFrame) -> pd.DataFrame:
+    out = phases_calc.copy()
+    out["CADC Rollup"] = out["Phase"].map(CADC_ROLLUP_MAP)
+    return out
+
+
 if "phases" not in st.session_state:
     st.session_state.phases = get_default_phases()
-
 if "dh_table" not in st.session_state:
     st.session_state.dh_table = build_default_datahall_table()
 
 st.title("CADC Schedule Simulator")
+st.caption("Internal MVP for OPC upload, schedule simulation, milestone tracking, and Data Hall RFS rollups.")
 
 uploaded = st.file_uploader("Upload OPC Excel Export", type=["xlsx"])
-
 if uploaded is not None:
     try:
-        parsed = parse_opc(uploaded)
-        st.session_state.phases = parsed
+        parsed_phases, parsed_dh = parse_opc(uploaded)
+        st.session_state.phases = parsed_phases
+        if not parsed_dh.empty:
+            st.session_state.dh_table = parsed_dh
         st.success("OPC file loaded.")
     except Exception as e:
         st.error(str(e))
 
-# sidebar manual milestone inputs
 with st.sidebar:
     st.header("Standalone Milestones")
     ntp_date = st.date_input("NTP", value=pd.Timestamp("2026-01-01"))
@@ -126,7 +137,7 @@ with st.sidebar:
     esa_use = st.checkbox("Use ESA")
     esa_date = st.date_input("ESA", value=pd.Timestamp("2027-03-01")) if esa_use else None
 
-st.subheader("Editable Schedule Grid")
+st.subheader("Editable Phase Grid")
 edited_phases = st.data_editor(
     st.session_state.phases,
     use_container_width=True,
@@ -142,17 +153,21 @@ edited_phases = st.data_editor(
 
 edited_phases["Start"] = pd.to_datetime(edited_phases["Start"], errors="coerce")
 edited_phases["Finish"] = pd.to_datetime(edited_phases["Finish"], errors="coerce")
-edited_phases["DurationDays"] = pd.to_numeric(edited_phases["DurationDays"], errors="coerce").fillna(0).astype(int)
+# If a user edits dates directly, keep DurationDays aligned to those edits.
+mask_valid_dates = edited_phases["Start"].notna() & edited_phases["Finish"].notna()
+edited_phases.loc[mask_valid_dates, "DurationDays"] = (
+    edited_phases.loc[mask_valid_dates, "Finish"] - edited_phases.loc[mask_valid_dates, "Start"]
+).dt.days
+edited_phases["DurationDays"] = pd.to_numeric(edited_phases["DurationDays"], errors="coerce").fillna(0).clip(lower=0).astype(int)
 edited_phases["Enabled"] = edited_phases["Enabled"].fillna(True).astype(bool)
-
 st.session_state.phases = edited_phases.copy()
 
-# Data Hall editor
 st.subheader("Data Hall Commissioning Inputs")
 edited_dh = st.data_editor(
     st.session_state.dh_table,
     use_container_width=True,
     hide_index=True,
+    num_rows="dynamic",
     column_config={
         "DataHall": st.column_config.TextColumn("Data Hall"),
         "MW": st.column_config.NumberColumn("MW", step=0.1),
@@ -161,39 +176,25 @@ edited_dh = st.data_editor(
     },
 )
 edited_dh["MW"] = pd.to_numeric(edited_dh["MW"], errors="coerce")
-edited_dh["CxDurationDays"] = pd.to_numeric(edited_dh["CxDurationDays"], errors="coerce").fillna(0).astype(int)
+edited_dh["CxDurationDays"] = pd.to_numeric(edited_dh["CxDurationDays"], errors="coerce").fillna(0).clip(lower=0).astype(int)
 edited_dh["LagFromPriorDH"] = pd.to_numeric(edited_dh["LagFromPriorDH"], errors="coerce").fillna(0).astype(int)
 st.session_state.dh_table = edited_dh.copy()
 
-# calculate everything
 phases_calc, conflicts = recalc_schedule(st.session_state.phases)
+phases_calc = add_cadc_rollups(phases_calc)
 
-milestones = derive_milestones(
-    phases_calc,
-    ntp_date=ntp_date,
-    power_on_date=power_on_date,
-    esa_date=esa_date,
-)
-
+milestones = derive_milestones(phases_calc, ntp_date=ntp_date, power_on_date=power_on_date, esa_date=esa_date)
 dh_results = calculate_datahall_rfs(phases_calc, st.session_state.dh_table)
 milestones = apply_first_final_rfs(milestones, dh_results)
 
-# enrich milestone display
 ntp_ts = pd.to_datetime(ntp_date)
 milestones["Months After NTP"] = milestones["Date"].apply(lambda d: months_after_ntp_text(ntp_ts, d))
-milestones["Date Text"] = milestones["Date"].dt.strftime("%Y-%m-%d")
+milestones["Date Text"] = pd.to_datetime(milestones["Date"]).dt.strftime("%Y-%m-%d")
 
-# layout
-left, center, right = st.columns([1.1, 2.2, 1.1])
-
+left, center, right = st.columns([1.2, 2.2, 1.2])
 with left:
-    st.subheader("Milestones")
-    st.dataframe(
-        milestones[["Milestone", "Date Text", "Months After NTP"]],
-        use_container_width=True,
-        hide_index=True,
-    )
-
+    st.subheader("Milestone Table")
+    st.dataframe(milestones[["Milestone", "Date Text", "Months After NTP"]], use_container_width=True, hide_index=True)
     if conflicts:
         st.subheader("Logic Flags")
         for c in conflicts:
@@ -201,31 +202,21 @@ with left:
 
 with center:
     st.subheader("Gantt")
-    fig = build_gantt(phases_calc)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(build_gantt(phases_calc), use_container_width=True)
 
 with right:
-    st.subheader("Data Hall RFS")
+    st.subheader("Data Hall / MW / RFS")
     dh_display = dh_results.copy()
     dh_display["MW Label"] = dh_display["MW"].apply(lambda x: "" if pd.isna(x) else f"{x:g} MW")
+    dh_display["Cx Start"] = pd.to_datetime(dh_display["CxStart"]).dt.strftime("%Y-%m-%d")
     dh_display["RFS"] = pd.to_datetime(dh_display["RFSDate"]).dt.strftime("%Y-%m-%d")
-    st.dataframe(
-        dh_display[["DataHall", "MW Label", "RFS"]],
-        use_container_width=True,
-        hide_index=True,
-    )
+    st.dataframe(dh_display[["DataHall", "MW Label", "Cx Start", "RFS"]], use_container_width=True, hide_index=True)
 
 st.subheader("KPI Cards")
 kpi_df = milestones[milestones["Milestone"].isin(KPI_MILESTONES)].copy()
-kpi_cols = st.columns(max(1, len(kpi_df)))
-
-for col, (_, row) in zip(kpi_cols, kpi_df.iterrows()):
+for col, (_, row) in zip(st.columns(max(1, len(kpi_df))), kpi_df.iterrows()):
     with col:
-        st.metric(
-            row["Milestone"],
-            row["Date Text"] if pd.notna(row["Date"]) else "",
-            row["Months After NTP"] if row["Months After NTP"] else None,
-        )
+        st.metric(row["Milestone"], row["Date Text"] if pd.notna(row["Date"]) else "", row["Months After NTP"] or None)
 
-st.subheader("Calculated Schedule")
+st.subheader("Calculated Schedule (with CADC rollups)")
 st.dataframe(phases_calc, use_container_width=True, hide_index=True)

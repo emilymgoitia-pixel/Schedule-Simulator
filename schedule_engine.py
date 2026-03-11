@@ -6,7 +6,7 @@ RELATIONSHIPS = [
     {"pred": "Civil", "succ": "Shell", "type": "FS", "lag": 0},
     {"pred": "Civil", "succ": "Equipment Yard", "type": "FS", "lag": 0},
     {"pred": "Shell", "succ": "MEP Fitup", "type": "FS", "lag": 0},
-    {"pred": "OFCI Procurement", "succ": "MEP Fitup", "type": "FF", "lag": 0},
+    {"pred": "MEP Fitup", "succ": "OFCI Procurement", "type": "FF", "lag": 0},
     {"pred": "MEP Fitup", "succ": "Commissioning", "type": "FS", "lag": 0},
     {"pred": "Site Power", "succ": "Commissioning", "type": "FS", "lag": 0},
     {"pred": "Commissioning", "succ": "Tenant Fitout", "type": "FS", "lag": 0},
@@ -213,6 +213,8 @@ def apply_first_final_rfs(milestones: pd.DataFrame, dh_results: pd.DataFrame) ->
     ])
 
     milestones = pd.concat([milestones, extra], ignore_index=True)
+    # Project Complete follows Final RFS as requested for CADC reporting.
+    milestones.loc[milestones["Milestone"] == "Project Complete", "Date"] = final_rfs
     return milestones
 
 
