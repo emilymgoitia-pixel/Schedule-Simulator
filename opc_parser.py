@@ -30,6 +30,18 @@ PHASE_ORDER = [
     "Tenant Fitout",
 ]
 
+RAW_OPC_COLUMNS = [
+    "Name",
+    "Start",
+    "Finish",
+    "Mano Phases",
+    "Area",
+    "Project",
+    "Data Hall",
+    "MW",
+    "Predecessor Details",
+]
+
 
 def clean_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
@@ -37,14 +49,19 @@ def clean_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def parse_opc(file, selected_project=None, selected_area=None):
-    df = pd.read_excel(file)
-    df = clean_columns(df)
-
-    required = ["Project", "Area", "Mano Phases", "Start", "Finish"]
+def _require_columns(df: pd.DataFrame, required: list[str]) -> None:
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(f"Missing required OPC columns: {', '.join(missing)}")
+
+
+def parse_opc(file, selected_project=None, selected_area=None):
+    """Parse raw OPC export into simulator phases and optional Data Hall seed data."""
+    df = pd.read_excel(file)
+    df = clean_columns(df)
+
+    # Support the raw export shape expected by internal teams.
+    _require_columns(df, ["Mano Phases", "Start", "Finish", "Project", "Area"])
 
     if selected_project:
         df = df[df["Project"] == selected_project]
@@ -65,19 +82,15 @@ def parse_opc(file, selected_project=None, selected_area=None):
         )
     )
 
-    grouped["DurationDays"] = (grouped["Finish"] - grouped["Start"]).dt.days
+    grouped["DurationDays"] = (grouped["Finish"] - grouped["Start"]).dt.days.clip(lower=0)
     grouped["Enabled"] = True
 
-    # Make sure all expected phases exist
     existing = set(grouped["Phase"])
     missing_phases = [p for p in PHASE_ORDER if p not in existing]
 
-    if not grouped.empty:
-        fallback_start = grouped["Start"].min()
-    else:
-        fallback_start = pd.Timestamp.today().normalize()
+    fallback_start = grouped["Start"].min() if not grouped.empty else pd.Timestamp.today().normalize()
 
-    for i, phase in enumerate(missing_phases):
+    for phase in missing_phases:
         grouped = pd.concat(
             [
                 grouped,
@@ -97,7 +110,39 @@ def parse_opc(file, selected_project=None, selected_area=None):
     grouped["Phase"] = pd.Categorical(grouped["Phase"], categories=PHASE_ORDER, ordered=True)
     grouped = grouped.sort_values("Phase").reset_index(drop=True)
 
-    return grouped
+    dh_seed = build_datahall_seed_from_opc(df)
+    return grouped, dh_seed
+
+
+def build_datahall_seed_from_opc(df: pd.DataFrame) -> pd.DataFrame:
+    """Build Data Hall/MW defaults from OPC rows when fields are present."""
+    if "Data Hall" not in df.columns:
+        return build_default_datahall_table()
+
+    working = df.copy()
+    working["Data Hall"] = working["Data Hall"].astype(str).str.strip()
+    working = working[working["Data Hall"].notna() & (working["Data Hall"] != "")]
+    if working.empty:
+        return build_default_datahall_table()
+
+    if "MW" in working.columns:
+        working["MW"] = pd.to_numeric(working["MW"], errors="coerce")
+    else:
+        working["MW"] = pd.NA
+
+    dh = (
+        working.groupby("Data Hall", as_index=False)
+        .agg(MW=("MW", "max"))
+        .sort_values("Data Hall")
+        .reset_index(drop=True)
+    )
+
+    dh["CxDurationDays"] = 60
+    dh["LagFromPriorDH"] = 30
+    if not dh.empty:
+        dh.at[0, "LagFromPriorDH"] = 0
+
+    return dh.rename(columns={"Data Hall": "DataHall"})[["DataHall", "MW", "CxDurationDays", "LagFromPriorDH"]]
 
 
 def build_default_datahall_table():
