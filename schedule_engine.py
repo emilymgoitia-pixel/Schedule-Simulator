@@ -139,7 +139,10 @@ def derive_milestones(
     milestones = [
         {"Milestone": "NTP", "Date": pd.to_datetime(ntp_date) if ntp_date else pd.NaT},
         {"Milestone": "Design Finish", "Date": phase_finish("Design")},
-        {"Milestone": "Building Permit Issued", "Date": phase_finish("Permitting")},
+        {"Milestone": "IFP", "Date": phase_start("Design")},
+        {"Milestone": "IFC", "Date": phase_finish("Design")},
+        {"Milestone": "Land Disturbance Permit", "Date": phase_start("Civil")},
+        {"Milestone": "Building Permit", "Date": phase_finish("Permitting")},
         {"Milestone": "Shell Start", "Date": phase_start("Shell")},
         {"Milestone": "Building Civil Start", "Date": phase_start("Civil")},
         {"Milestone": "Power On", "Date": pd.to_datetime(power_on_date) if power_on_date else pd.NaT},
