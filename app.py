@@ -235,9 +235,6 @@ def build_gantt(current_df: pd.DataFrame, datahall_rfs: pd.DataFrame | None = No
     df["Phase"] = pd.Categorical(df["Phase"], categories=gantt_phase_order, ordered=True)
     df = df.sort_values("Phase", ascending=False)
 
-    df["DurationDays"] = (df["Finish"] - df["Start"]).dt.days.clip(lower=0)
-    df["DurationMs"] = (df["Finish"] - df["Start"]).dt.total_seconds() * 1000
-
     fig = go.Figure()
     fig.add_trace(
         go.Bar(
