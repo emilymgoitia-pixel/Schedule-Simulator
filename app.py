@@ -510,7 +510,7 @@ with left:
         milestone_styler,
         width="stretch",
         hide_index=True,
-        height=500,
+        height=600,
         row_height=28,
         column_config={
             "Milestone": st.column_config.TextColumn("Milestone", width="medium"),
