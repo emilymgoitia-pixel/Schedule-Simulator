@@ -513,8 +513,8 @@ with left:
         height=500,
         row_height=28,
         column_config={
-            "Milestone": st.column_config.TextColumn("Milestone", width="small"),
-            "Date Text": st.column_config.TextColumn("Date", width="large"),
+            "Milestone": st.column_config.TextColumn("Milestone", width="medium"),
+            "Date Text": st.column_config.TextColumn("Date", width="small"),
         },
     )
     st.caption("Months-after-NTP remains available in KPI cards above.")
