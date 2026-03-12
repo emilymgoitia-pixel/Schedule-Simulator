@@ -338,6 +338,21 @@ def add_cadc_rollups(phases_calc: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def months_from_reference_text(reference_date, target_date, suffix_label: str) -> str:
+    if pd.isna(reference_date) or pd.isna(target_date):
+        return ""
+    total_days = (target_date - reference_date).days
+    months_decimal = total_days / 30.4375
+    rounded = round(months_decimal * 2) / 2
+    if rounded < 1:
+        base = f"{total_days} days"
+    elif float(rounded).is_integer():
+        base = f"{int(rounded)} months"
+    else:
+        base = f"{rounded:.1f} months"
+    return f"{base} from {suffix_label}"
+
+
 def render_kpi_cards(kpi_rows: pd.DataFrame) -> None:
     first_row_order = [
         "Civil Complete",
@@ -365,7 +380,7 @@ def render_kpi_cards(kpi_rows: pd.DataFrame) -> None:
                     <div class="kpi-card">
                         <div class="kpi-title">{row['Milestone']}</div>
                         <div class="kpi-date">{row['Date Text'] if pd.notna(row['Date']) else '-'}</div>
-                        <div class="{chip_class}">{row['Months After NTP'] or '—'}</div>
+                        <div class="{chip_class}">{row.get('Months Label', row['Months After NTP']) or '—'}</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -473,6 +488,10 @@ manual_kpis = pd.DataFrame([
     },
 ])
 kpi_df = pd.concat([kpi_df, manual_kpis], ignore_index=True)
+today_ts = pd.Timestamp.today().normalize()
+reference_ts = today_ts if pd.notna(ntp_ts) and today_ts >= ntp_ts else ntp_ts
+reference_label = "today" if pd.notna(ntp_ts) and today_ts >= ntp_ts else "LOI/NTP"
+kpi_df["Months Label"] = kpi_df["Date"].apply(lambda d: months_from_reference_text(reference_ts, d, reference_label))
 render_kpi_cards(kpi_df)
 
 left, center, right = st.columns([1.2, 3.05, 1.25], gap="small")
@@ -481,16 +500,21 @@ with left:
     st.markdown('<div class="section-title">Milestone Panel</div>', unsafe_allow_html=True)
     milestone_panel = milestones[["Milestone", "Date", "Date Text"]].copy()
     milestone_panel = milestone_panel[milestone_panel["Date"].notna()].copy()
-    milestone_panel = milestone_panel[["Milestone", "Date Text"]]
+    milestone_panel["IsPast"] = pd.to_datetime(milestone_panel["Date"], errors="coerce") < pd.Timestamp.today().normalize()
+    milestone_display = milestone_panel[["Milestone", "Date Text", "IsPast"]].copy()
+    milestone_styler = milestone_display[["Milestone", "Date Text"]].style.apply(
+        lambda row: ["", "color: #9ca3af;" if milestone_display.loc[row.name, "IsPast"] else ""],
+        axis=1,
+    )
     st.dataframe(
-        milestone_panel,
+        milestone_styler,
         width="stretch",
         hide_index=True,
-        height=600,
+        height=500,
         row_height=28,
         column_config={
-            "Milestone": st.column_config.TextColumn("Milestone", width="large"),
-            "Date Text": st.column_config.TextColumn("Date", width="small"),
+            "Milestone": st.column_config.TextColumn("Milestone", width="small"),
+            "Date Text": st.column_config.TextColumn("Date", width="large"),
         },
     )
     st.caption("Months-after-NTP remains available in KPI cards above.")
