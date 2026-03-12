@@ -486,11 +486,11 @@ with left:
         milestone_panel,
         width="stretch",
         hide_index=True,
-        height=500,
+        height=600,
         row_height=28,
         column_config={
-            "Milestone": st.column_config.TextColumn("Milestone", width="small"),
-            "Date Text": st.column_config.TextColumn("Date", width="large"),
+            "Milestone": st.column_config.TextColumn("Milestone", width="large"),
+            "Date Text": st.column_config.TextColumn("Date", width="small"),
         },
     )
     st.caption("Months-after-NTP remains available in KPI cards above.")
