@@ -59,14 +59,14 @@ def recalc_schedule(phases: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
 
             if rel_type == "FS":
                 required_start = pred_finish + pd.Timedelta(days=lag)
-                if succ_start < required_start:
+                if succ_start != required_start:
                     df.at[s, "Start"] = required_start
                     df.at[s, "Finish"] = required_start + pd.Timedelta(days=duration)
                     changed = True
 
             elif rel_type == "FF":
                 required_finish = pred_finish + pd.Timedelta(days=lag)
-                if succ_finish < required_finish:
+                if succ_finish != required_finish:
                     df.at[s, "Finish"] = required_finish
                     df.at[s, "Start"] = required_finish - pd.Timedelta(days=duration)
                     changed = True
@@ -139,7 +139,10 @@ def derive_milestones(
     milestones = [
         {"Milestone": "NTP", "Date": pd.to_datetime(ntp_date) if ntp_date else pd.NaT},
         {"Milestone": "Design Finish", "Date": phase_finish("Design")},
-        {"Milestone": "Building Permit Issued", "Date": phase_finish("Permitting")},
+        {"Milestone": "IFP", "Date": phase_start("Design")},
+        {"Milestone": "IFC", "Date": phase_finish("Design")},
+        {"Milestone": "Land Disturbance Permit", "Date": phase_start("Civil")},
+        {"Milestone": "Building Permit", "Date": phase_finish("Permitting")},
         {"Milestone": "Shell Start", "Date": phase_start("Shell")},
         {"Milestone": "Building Civil Start", "Date": phase_start("Civil")},
         {"Milestone": "Power On", "Date": pd.to_datetime(power_on_date) if power_on_date else pd.NaT},
