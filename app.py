@@ -422,6 +422,39 @@ with st.sidebar:
     ntp_date = st.date_input("NTP", value=st.session_state.ntp_date_value)
     power_on_date = st.date_input("Power On", value=st.session_state.power_on_date_value)
 
+    current_hall_count = int(len(st.session_state.dh_table.index)) if not st.session_state.dh_table.empty else 0
+    hall_count = st.number_input(
+        "Number of Data Halls",
+        min_value=1,
+        max_value=20,
+        value=max(1, current_hall_count),
+        step=1,
+        help="Adds/removes Data Halls and duplicates Cx/RFS assumptions using DH2/DH3 pattern.",
+    )
+
+    target_hall_count = int(hall_count)
+    if target_hall_count != current_hall_count:
+        existing_dh = st.session_state.dh_table.copy().reset_index(drop=True)
+        template_rows = existing_dh if not existing_dh.empty else build_default_datahall_table()
+        resized_rows = []
+        for i in range(target_hall_count):
+            if i < len(existing_dh):
+                row = existing_dh.iloc[i].copy()
+            else:
+                if len(template_rows) >= 3:
+                    row = template_rows.iloc[2].copy()
+                elif len(template_rows) >= 2:
+                    row = template_rows.iloc[1].copy()
+                else:
+                    row = template_rows.iloc[0].copy()
+            row["DataHall"] = f"DH{i + 1}"
+            row["LagFromPriorDH"] = 0 if i == 0 else int(pd.to_numeric(row.get("LagFromPriorDH", 30), errors="coerce") or 30)
+            row["CxDurationDays"] = int(pd.to_numeric(row.get("CxDurationDays", 60), errors="coerce") or 60)
+            row["MW"] = float(pd.to_numeric(row.get("MW", 16.8), errors="coerce") or 16.8)
+            resized_rows.append(row)
+
+        st.session_state.dh_table = pd.DataFrame(resized_rows)[["DataHall", "MW", "CxDurationDays", "LagFromPriorDH"]]
+
     prev_ntp = pd.to_datetime(st.session_state.prev_ntp_date_value)
     prev_power = pd.to_datetime(st.session_state.prev_power_on_date_value)
     new_ntp = pd.to_datetime(ntp_date)
