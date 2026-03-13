@@ -404,7 +404,7 @@ if "prev_power_on_date_value" not in st.session_state:
     st.session_state.prev_power_on_date_value = st.session_state.power_on_date_value
 
 st.title("CADC Schedule Simulator")
-st.caption("Executive-style schedule dashboard with milestone tracking and Data Hall RFS rollups.")
+st.markdown("<div style='font-size:0.72rem; color:#7b86ad; margin-top:-0.2rem; margin-bottom:0.45rem;'>v0.1.0</div>", unsafe_allow_html=True)
 
 uploaded = st.file_uploader("Upload OPC Excel Export", type=["xlsx"])
 if uploaded is not None:
@@ -692,4 +692,8 @@ with bottom_right:
     st.markdown('</div>', unsafe_allow_html=True)
 
 with st.expander("Calculated Schedule (with CADC rollups)", expanded=False):
-    st.dataframe(phases_calc, width="stretch", hide_index=True)
+    phases_display = phases_calc.copy()
+    for col in ["Start", "Finish"]:
+        if col in phases_display.columns:
+            phases_display[col] = pd.to_datetime(phases_display[col], errors="coerce").dt.strftime("%d %b %Y")
+    st.dataframe(phases_display, width="stretch", hide_index=True)
