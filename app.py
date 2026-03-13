@@ -463,11 +463,17 @@ with st.sidebar:
     ntp_changed = new_ntp != prev_ntp
     power_changed = new_power != prev_power
 
-    if ntp_changed and not power_changed:
+    if ntp_changed:
         delta = new_ntp - prev_ntp
-        adjusted_power = (prev_power + delta).date()
-        power_on_date = adjusted_power
-        new_power = pd.to_datetime(power_on_date)
+        phases_shifted = st.session_state.phases.copy()
+        phases_shifted["Start"] = pd.to_datetime(phases_shifted["Start"], errors="coerce") + delta
+        phases_shifted["Finish"] = pd.to_datetime(phases_shifted["Finish"], errors="coerce") + delta
+        st.session_state.phases = phases_shifted
+
+        if not power_changed:
+            adjusted_power = (prev_power + delta).date()
+            power_on_date = adjusted_power
+            new_power = pd.to_datetime(power_on_date)
 
     st.session_state.ntp_date_value = new_ntp.date()
     st.session_state.power_on_date_value = new_power.date()
@@ -621,8 +627,13 @@ reference_label = "today" if pd.notna(ntp_ts) and today_ts >= ntp_ts else "LOI/N
 kpi_df["Months Label"] = kpi_df["Date"].apply(lambda d: months_from_reference_text(reference_ts, d, reference_label))
 render_kpi_cards(kpi_df)
 
-left, center, right = st.columns([1.2, 3.05, 1.25], gap="small")
-with left:
+st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">Master Schedule Gantt</div>', unsafe_allow_html=True)
+st.plotly_chart(build_gantt(phases_calc, dh_results), width="stretch", config={"displayModeBar": False})
+st.markdown('</div>', unsafe_allow_html=True)
+
+bottom_left, bottom_right = st.columns([1.25, 1.25], gap="small")
+with bottom_left:
     st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Milestone Panel</div>', unsafe_allow_html=True)
     milestone_panel = milestones[["Milestone", "Date", "Date Text"]].copy()
@@ -653,13 +664,7 @@ with left:
             st.markdown(f'<div class="logic-flag">{c}</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-with center:
-    st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Master Schedule Gantt</div>', unsafe_allow_html=True)
-    st.plotly_chart(build_gantt(phases_calc, dh_results), width="stretch", config={"displayModeBar": False})
-    st.markdown('</div>', unsafe_allow_html=True)
-
-with right:
+with bottom_right:
     st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Data Hall RFS</div>', unsafe_allow_html=True)
     dh_display = dh_results.copy()
@@ -681,7 +686,7 @@ with right:
         column_config={
             "DataHall": st.column_config.TextColumn("Data Hall", width="small"),
             "MW Label": st.column_config.TextColumn("MW", width="small"),
-            "RFS": st.column_config.TextColumn("RFS", width="medium"),
+            "RFS": st.column_config.TextColumn("RFS", width="small"),
         },
     )
     st.markdown('</div>', unsafe_allow_html=True)
