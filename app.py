@@ -419,8 +419,8 @@ if uploaded is not None:
 
 with st.sidebar:
     st.subheader("Planning Inputs")
-    ntp_date = st.date_input("NTP", value=st.session_state.ntp_date_value, key="ntp_date_input")
-    power_on_date = st.date_input("Power On", value=st.session_state.power_on_date_value, key="power_on_date_input")
+    ntp_date = st.date_input("NTP", value=st.session_state.ntp_date_value)
+    power_on_date = st.date_input("Power On", value=st.session_state.power_on_date_value)
 
     prev_ntp = pd.to_datetime(st.session_state.prev_ntp_date_value)
     prev_power = pd.to_datetime(st.session_state.prev_power_on_date_value)
@@ -433,7 +433,6 @@ with st.sidebar:
     if ntp_changed and not power_changed:
         delta = new_ntp - prev_ntp
         adjusted_power = (prev_power + delta).date()
-        st.session_state.power_on_date_input = adjusted_power
         power_on_date = adjusted_power
         new_power = pd.to_datetime(power_on_date)
 
