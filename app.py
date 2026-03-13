@@ -519,7 +519,29 @@ with st.expander("Editing Controls", expanded=False):
     edited_dh["LagFromPriorDH"] = pd.to_numeric(edited_dh["LagFromPriorDH"], errors="coerce").fillna(0).astype(int)
     st.session_state.dh_table = edited_dh.copy()
 
-phases_calc, conflicts = recalc_schedule(st.session_state.phases)
+phases_for_calc = st.session_state.phases.copy()
+power_on_ts = pd.to_datetime(power_on_date, errors="coerce")
+
+site_power_mask_input = phases_for_calc["Phase"] == "Site Power"
+if site_power_mask_input.any() and pd.notna(power_on_ts):
+    sp_idx = phases_for_calc.index[site_power_mask_input][0]
+    sp_enabled = bool(phases_for_calc.at[sp_idx, "Enabled"])
+    sp_start = pd.to_datetime(phases_for_calc.at[sp_idx, "Start"], errors="coerce")
+    if sp_enabled and pd.notna(sp_start) and power_on_ts >= sp_start:
+        phases_for_calc.at[sp_idx, "Finish"] = power_on_ts
+        phases_for_calc.at[sp_idx, "DurationDays"] = int((power_on_ts - sp_start).days)
+
+commissioning_mask_input = phases_for_calc["Phase"] == "Commissioning"
+if commissioning_mask_input.any() and pd.notna(power_on_ts):
+    cx_idx = phases_for_calc.index[commissioning_mask_input][0]
+    cx_enabled = bool(phases_for_calc.at[cx_idx, "Enabled"])
+    cx_start = pd.to_datetime(phases_for_calc.at[cx_idx, "Start"], errors="coerce")
+    cx_duration = int(pd.to_numeric(phases_for_calc.at[cx_idx, "DurationDays"], errors="coerce") or 0)
+    if cx_enabled and pd.notna(cx_start) and cx_start < power_on_ts:
+        phases_for_calc.at[cx_idx, "Start"] = power_on_ts
+        phases_for_calc.at[cx_idx, "Finish"] = power_on_ts + pd.Timedelta(days=cx_duration)
+
+phases_calc, conflicts = recalc_schedule(phases_for_calc)
 phases_calc = add_cadc_rollups(phases_calc)
 
 # Data Hall RFS runs within Commissioning. If Tenant Fitout is disabled,
