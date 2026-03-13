@@ -394,6 +394,15 @@ if "phases" not in st.session_state:
 if "dh_table" not in st.session_state:
     st.session_state.dh_table = build_default_datahall_table()
 
+if "ntp_date_value" not in st.session_state:
+    st.session_state.ntp_date_value = pd.Timestamp("2026-01-01").date()
+if "power_on_date_value" not in st.session_state:
+    st.session_state.power_on_date_value = pd.Timestamp("2027-01-15").date()
+if "prev_ntp_date_value" not in st.session_state:
+    st.session_state.prev_ntp_date_value = st.session_state.ntp_date_value
+if "prev_power_on_date_value" not in st.session_state:
+    st.session_state.prev_power_on_date_value = st.session_state.power_on_date_value
+
 st.title("CADC Schedule Simulator")
 st.caption("Executive-style schedule dashboard with milestone tracking and Data Hall RFS rollups.")
 
@@ -410,8 +419,29 @@ if uploaded is not None:
 
 with st.sidebar:
     st.subheader("Planning Inputs")
-    ntp_date = st.date_input("NTP", value=pd.Timestamp("2026-01-01"))
-    power_on_date = st.date_input("Power On", value=pd.Timestamp("2027-01-15"))
+    ntp_date = st.date_input("NTP", value=st.session_state.ntp_date_value, key="ntp_date_input")
+    power_on_date = st.date_input("Power On", value=st.session_state.power_on_date_value, key="power_on_date_input")
+
+    prev_ntp = pd.to_datetime(st.session_state.prev_ntp_date_value)
+    prev_power = pd.to_datetime(st.session_state.prev_power_on_date_value)
+    new_ntp = pd.to_datetime(ntp_date)
+    new_power = pd.to_datetime(power_on_date)
+
+    ntp_changed = new_ntp != prev_ntp
+    power_changed = new_power != prev_power
+
+    if ntp_changed and not power_changed:
+        delta = new_ntp - prev_ntp
+        adjusted_power = (prev_power + delta).date()
+        st.session_state.power_on_date_input = adjusted_power
+        power_on_date = adjusted_power
+        new_power = pd.to_datetime(power_on_date)
+
+    st.session_state.ntp_date_value = new_ntp.date()
+    st.session_state.power_on_date_value = new_power.date()
+    st.session_state.prev_ntp_date_value = new_ntp.date()
+    st.session_state.prev_power_on_date_value = new_power.date()
+
     esa_use = st.checkbox("Use ESA")
     esa_date = st.date_input("ESA", value=pd.Timestamp("2027-03-01")) if esa_use else None
     st.divider()
@@ -419,8 +449,9 @@ with st.sidebar:
 
 with st.expander("Editing Controls", expanded=False):
     st.markdown('<div class="section-title">Phase Inputs</div>', unsafe_allow_html=True)
+    prior_phases = st.session_state.phases.copy()
     edited_phases = st.data_editor(
-        st.session_state.phases,
+        prior_phases,
         width="stretch",
         hide_index=True,
         column_config={
@@ -434,10 +465,39 @@ with st.expander("Editing Controls", expanded=False):
 
     edited_phases["Start"] = pd.to_datetime(edited_phases["Start"], errors="coerce")
     edited_phases["Finish"] = pd.to_datetime(edited_phases["Finish"], errors="coerce")
-    mask_valid_dates = edited_phases["Start"].notna() & edited_phases["Finish"].notna()
-    edited_phases.loc[mask_valid_dates, "DurationDays"] = (
-        edited_phases.loc[mask_valid_dates, "Finish"] - edited_phases.loc[mask_valid_dates, "Start"]
-    ).dt.days
+    edited_phases["DurationDays"] = pd.to_numeric(edited_phases["DurationDays"], errors="coerce")
+
+    prior_lookup = prior_phases.set_index("Phase")
+    for idx, row in edited_phases.iterrows():
+        phase = row["Phase"]
+        if phase not in prior_lookup.index:
+            continue
+
+        prev_start = pd.to_datetime(prior_lookup.at[phase, "Start"], errors="coerce")
+        prev_finish = pd.to_datetime(prior_lookup.at[phase, "Finish"], errors="coerce")
+        prev_duration = int(pd.to_numeric(prior_lookup.at[phase, "DurationDays"], errors="coerce") or 0)
+
+        new_start = row["Start"]
+        new_finish = row["Finish"]
+        new_duration = row["DurationDays"]
+
+        start_changed = pd.notna(new_start) and pd.notna(prev_start) and new_start != prev_start
+        finish_changed = pd.notna(new_finish) and pd.notna(prev_finish) and new_finish != prev_finish
+        duration_changed = pd.notna(new_duration) and int(new_duration) != prev_duration
+
+        if start_changed and not finish_changed:
+            edited_phases.at[idx, "Finish"] = new_start + pd.Timedelta(days=prev_duration)
+            edited_phases.at[idx, "DurationDays"] = prev_duration
+        elif finish_changed and not start_changed and pd.notna(new_start):
+            edited_phases.at[idx, "DurationDays"] = max(0, int((new_finish - new_start).days))
+        elif start_changed and finish_changed and pd.notna(new_start) and pd.notna(new_finish):
+            edited_phases.at[idx, "DurationDays"] = max(0, int((new_finish - new_start).days))
+        elif duration_changed and pd.notna(new_start):
+            edited_phases.at[idx, "DurationDays"] = max(0, int(new_duration))
+            edited_phases.at[idx, "Finish"] = new_start + pd.Timedelta(days=int(edited_phases.at[idx, "DurationDays"]))
+        elif pd.notna(new_start) and pd.notna(new_finish):
+            edited_phases.at[idx, "DurationDays"] = max(0, int((new_finish - new_start).days))
+
     edited_phases["DurationDays"] = pd.to_numeric(edited_phases["DurationDays"], errors="coerce").fillna(0).clip(lower=0).astype(int)
     edited_phases["Enabled"] = edited_phases["Enabled"].fillna(True).astype(bool)
     st.session_state.phases = edited_phases.copy()
@@ -463,8 +523,21 @@ with st.expander("Editing Controls", expanded=False):
 phases_calc, conflicts = recalc_schedule(st.session_state.phases)
 phases_calc = add_cadc_rollups(phases_calc)
 
-milestones = derive_milestones(phases_calc, ntp_date=ntp_date, power_on_date=power_on_date, esa_date=esa_date)
+# Data Hall RFS runs within Commissioning. If Tenant Fitout is disabled,
+# keep Commissioning bar through Final RFS so Gantt and milestone logic align.
 dh_results = calculate_datahall_rfs(phases_calc, st.session_state.dh_table)
+if not dh_results.empty and dh_results["RFSDate"].notna().any():
+    final_rfs = pd.to_datetime(dh_results["RFSDate"]).max()
+    commissioning_mask = phases_calc["Phase"] == "Commissioning"
+    tfo_mask = phases_calc["Phase"] == "Tenant Fitout"
+    tfo_enabled = bool(phases_calc.loc[tfo_mask, "Enabled"].any()) if tfo_mask.any() else False
+    if commissioning_mask.any() and not tfo_enabled:
+        cx_start = pd.to_datetime(phases_calc.loc[commissioning_mask, "Start"]).iloc[0]
+        if pd.notna(cx_start) and pd.notna(final_rfs) and final_rfs >= cx_start:
+            phases_calc.loc[commissioning_mask, "Finish"] = final_rfs
+            phases_calc.loc[commissioning_mask, "DurationDays"] = int((final_rfs - cx_start).days)
+
+milestones = derive_milestones(phases_calc, ntp_date=ntp_date, power_on_date=power_on_date, esa_date=esa_date)
 milestones = apply_first_final_rfs(milestones, dh_results)
 
 ntp_ts = pd.to_datetime(ntp_date)
