@@ -444,7 +444,7 @@ def apply_first_final_rfs(milestones: pd.DataFrame, dh_results: pd.DataFrame) ->
 
 
 # ---------------------------------------------------------------------------
-# Shared time-display utilities (used by both engine logic and app.py)
+# Shared time-display utilities (used by both engine logic and app.py) 
 # ---------------------------------------------------------------------------
 
 def months_after_ntp_text(ntp_date, target_date) -> str:
