@@ -3,11 +3,13 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from schedule_engine import (
+    DEFAULT_RELATIONSHIPS,
     recalc_schedule,
     derive_milestones,
     calculate_datahall_rfs,
     apply_first_final_rfs,
     months_after_ntp_text,
+    months_from_reference_text,
 )
 from opc_parser import parse_opc, build_default_datahall_table
 
@@ -162,54 +164,52 @@ st.markdown(
 )
 
 PHASE_ORDER = [
-    "Design",
-    "Permitting",
-    "Site Power",
-    "OFCI Procurement",
-    "Civil",
-    "Shell",
-    "Equipment Yard",
-    "MEP Fitup",
-    "Commissioning",
-    "Tenant Fitout",
+    "Design", "Permitting", "Site Power", "OFCI Procurement",
+    "Civil", "Shell", "Equipment Yard", "MEP Fitup", "Commissioning", "Tenant Fitout",
 ]
 
 CADC_ROLLUP_MAP = {
-    "Design": "Phase 3A",
-    "Permitting": "Phase 3A",
-    "Site Power": "Power",
-    "OFCI Procurement": "OFCI Production",
-    "Civil": "Phase 3B",
-    "Shell": "Phase 3B",
-    "Equipment Yard": "Phase 3B",
-    "MEP Fitup": "Phase 3B",
-    "Commissioning": "Phase 3B",
-    "Tenant Fitout": "Phase 4",
+    "Design":            "Phase 3A",
+    "Permitting":        "Phase 3A",
+    "Site Power":        "Power",
+    "OFCI Procurement":  "OFCI Production",
+    "Civil":             "Phase 3B",
+    "Shell":             "Phase 3B",
+    "Equipment Yard":    "Phase 3B",
+    "MEP Fitup":         "Phase 3B",
+    "Commissioning":     "Phase 3B",
+    "Tenant Fitout":     "Phase 4",
 }
 
 KPI_MILESTONES = [
-    "Civil Complete",
-    "Shell Complete",
-    "OFCI Procurement Complete",
-    "Fitup Complete",
-    "First RFS",
-    "Final RFS",
-    "Project Complete",
+    "Civil Complete", "Shell Complete", "OFCI Procurement Complete",
+    "Fitup Complete", "First RFS", "Final RFS", "Project Complete",
 ]
 
+# Columns that belong in session_state.phases (no computed extras)
+BASE_PHASE_COLS = ["Phase", "Start", "Finish", "DurationDays", "Enabled"]
 
-def get_default_phases():
+# Critical path / non-critical bar colours for the Gantt
+COLOR_CRITICAL    = "#E85D24"   # coral — zero float
+COLOR_NONCRITICAL = "#6B7AF5"   # indigo — has float
+
+
+# ---------------------------------------------------------------------------
+# Default phase table
+# ---------------------------------------------------------------------------
+
+def get_default_phases() -> pd.DataFrame:
     df = pd.DataFrame([
-        {"Phase": "Design", "Start": "2026-01-01", "Finish": "2026-02-15", "DurationDays": 45, "Enabled": True},
-        {"Phase": "Permitting", "Start": "2026-02-16", "Finish": "2026-05-01", "DurationDays": 75, "Enabled": True},
-        {"Phase": "Site Power", "Start": "2026-03-01", "Finish": "2026-11-01", "DurationDays": 245, "Enabled": True},
-        {"Phase": "OFCI Procurement", "Start": "2026-02-01", "Finish": "2026-10-15", "DurationDays": 256, "Enabled": True},
-        {"Phase": "Civil", "Start": "2026-05-02", "Finish": "2026-08-01", "DurationDays": 91, "Enabled": True},
-        {"Phase": "Shell", "Start": "2026-08-02", "Finish": "2026-11-15", "DurationDays": 105, "Enabled": True},
-        {"Phase": "Equipment Yard", "Start": "2026-08-10", "Finish": "2026-12-15", "DurationDays": 127, "Enabled": True},
-        {"Phase": "MEP Fitup", "Start": "2026-11-16", "Finish": "2027-02-01", "DurationDays": 77, "Enabled": True},
-        {"Phase": "Commissioning", "Start": "2027-02-02", "Finish": "2027-04-01", "DurationDays": 58, "Enabled": True},
-        {"Phase": "Tenant Fitout", "Start": "2027-04-02", "Finish": "2027-05-15", "DurationDays": 43, "Enabled": False},
+        {"Phase": "Design",           "Start": "2026-01-01", "Finish": "2026-02-15",  "DurationDays":  45, "Enabled": True},
+        {"Phase": "Permitting",       "Start": "2026-02-16", "Finish": "2026-05-01",  "DurationDays":  75, "Enabled": True},
+        {"Phase": "Site Power",       "Start": "2026-03-01", "Finish": "2026-11-01",  "DurationDays": 245, "Enabled": True},
+        {"Phase": "OFCI Procurement", "Start": "2026-02-01", "Finish": "2026-10-15",  "DurationDays": 256, "Enabled": True},
+        {"Phase": "Civil",            "Start": "2026-05-02", "Finish": "2026-08-01",  "DurationDays":  91, "Enabled": True},
+        {"Phase": "Shell",            "Start": "2026-08-02", "Finish": "2026-11-15",  "DurationDays": 105, "Enabled": True},
+        {"Phase": "Equipment Yard",   "Start": "2026-08-10", "Finish": "2026-12-15",  "DurationDays": 127, "Enabled": True},
+        {"Phase": "MEP Fitup",        "Start": "2026-11-16", "Finish": "2027-02-01",  "DurationDays":  77, "Enabled": True},
+        {"Phase": "Commissioning",    "Start": "2027-02-02", "Finish": "2027-04-01",  "DurationDays":  58, "Enabled": True},
+        {"Phase": "Tenant Fitout",    "Start": "2027-04-02", "Finish": "2027-05-15",  "DurationDays":  43, "Enabled": False},
     ])
     df["Start"] = pd.to_datetime(df["Start"])
     df["Finish"] = pd.to_datetime(df["Finish"])
@@ -234,6 +234,17 @@ def build_gantt(current_df: pd.DataFrame, datahall_rfs: pd.DataFrame | None = No
     ]
     df["Phase"] = pd.Categorical(df["Phase"], categories=gantt_phase_order, ordered=True)
     df = df.sort_values("Phase", ascending=False)
+    df["DurationDays"] = (df["Finish"] - df["Start"]).dt.days.clip(lower=0)
+    df["DurationMs"]   = (df["Finish"] - df["Start"]).dt.total_seconds() * 1000
+
+    # Colour bars by critical path (TotalFloat == 0 → coral, else indigo)
+    def bar_color(row):
+        tf = row.get("TotalFloat", None)
+        if pd.notna(tf) and int(tf) == 0:
+            return COLOR_CRITICAL
+        return COLOR_NONCRITICAL
+
+    colors = df.apply(bar_color, axis=1).tolist()
 
     df["DurationDays"] = (df["Finish"] - df["Start"]).dt.days.clip(lower=0)
     df["DurationMs"] = (df["Finish"] - df["Start"]).dt.total_seconds() * 1000
@@ -332,6 +343,10 @@ def build_gantt(current_df: pd.DataFrame, datahall_rfs: pd.DataFrame | None = No
     return fig
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 def add_cadc_rollups(phases_calc: pd.DataFrame) -> pd.DataFrame:
     out = phases_calc.copy()
     out["CADC Rollup"] = out["Phase"].map(CADC_ROLLUP_MAP)
@@ -393,6 +408,24 @@ if "phases" not in st.session_state:
     st.session_state.phases = get_default_phases()
 if "dh_table" not in st.session_state:
     st.session_state.dh_table = build_default_datahall_table()
+if "relationships" not in st.session_state:
+    st.session_state.relationships = DEFAULT_RELATIONSHIPS
+if "ntp_date_value" not in st.session_state:
+    st.session_state.ntp_date_value = pd.Timestamp("2026-01-01").date()
+if "power_on_date_value" not in st.session_state:
+    st.session_state.power_on_date_value = pd.Timestamp("2027-01-15").date()
+if "prev_ntp_date_value" not in st.session_state:
+    st.session_state.prev_ntp_date_value = st.session_state.ntp_date_value
+if "prev_power_on_date_value" not in st.session_state:
+    st.session_state.prev_power_on_date_value = st.session_state.power_on_date_value
+# Track uploaded file identity to skip redundant re-parsing on every rerun
+if "uploaded_file_key" not in st.session_state:
+    st.session_state.uploaded_file_key = None
+
+
+# ---------------------------------------------------------------------------
+# Page header
+# ---------------------------------------------------------------------------
 
 if "ntp_date_value" not in st.session_state:
     st.session_state.ntp_date_value = pd.Timestamp("2026-01-01").date()
@@ -407,15 +440,39 @@ st.title("CADC Schedule Simulator")
 st.markdown("<div style='font-size:0.72rem; color:#7b86ad; margin-top:-0.2rem; margin-bottom:0.45rem;'>v0.1.0</div>", unsafe_allow_html=True)
 
 uploaded = st.file_uploader("Upload OPC Excel Export", type=["xlsx"])
+
 if uploaded is not None:
-    try:
-        parsed_phases, parsed_dh = parse_opc(uploaded)
-        st.session_state.phases = parsed_phases
-        if not parsed_dh.empty:
-            st.session_state.dh_table = parsed_dh
-        st.success("OPC file loaded.")
-    except Exception as e:
-        st.error(str(e))
+    file_key = f"{uploaded.name}_{uploaded.size}"
+    if st.session_state.uploaded_file_key != file_key:
+        try:
+            parsed_phases, parsed_dh, parsed_rels = parse_opc(uploaded)
+            st.session_state.phases = parsed_phases
+            if not parsed_dh.empty:
+                st.session_state.dh_table = parsed_dh
+            if parsed_rels is not None:
+                st.session_state.relationships = parsed_rels
+                st.success(
+                    f"OPC file loaded — {len(parsed_rels)} phase-level relationships parsed from file."
+                )
+            else:
+                st.session_state.relationships = DEFAULT_RELATIONSHIPS
+                st.success("OPC file loaded.")
+                st.info(
+                    "No predecessor data found in file — using default logic network. "
+                    "Add a 'Predecessor Details' column to the export to load relationships dynamically."
+                )
+            st.session_state.uploaded_file_key = file_key
+        except Exception as exc:
+            st.error(str(exc))
+elif uploaded is None:
+    # File was cleared — reset to default relationships if no file is loaded
+    if st.session_state.uploaded_file_key is not None:
+        st.session_state.relationships = DEFAULT_RELATIONSHIPS
+        st.session_state.uploaded_file_key = None
+
+# ---------------------------------------------------------------------------
+# Sidebar — planning inputs
+# ---------------------------------------------------------------------------
 
 with st.sidebar:
     st.subheader("Planning Inputs")
