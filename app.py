@@ -242,9 +242,6 @@ def build_gantt(current_df: pd.DataFrame, datahall_rfs: pd.DataFrame | None = No
 
     colors = df.apply(bar_color, axis=1).tolist()
 
-    df["DurationDays"] = (df["Finish"] - df["Start"]).dt.days.clip(lower=0)
-    df["DurationMs"] = (df["Finish"] - df["Start"]).dt.total_seconds() * 1000
-
     fig = go.Figure()
     fig.add_trace(
         go.Bar(
@@ -415,15 +412,6 @@ if "uploaded_file_key" not in st.session_state:
 # Page header
 # ---------------------------------------------------------------------------
 
-if "ntp_date_value" not in st.session_state:
-    st.session_state.ntp_date_value = pd.Timestamp("2026-01-01").date()
-if "power_on_date_value" not in st.session_state:
-    st.session_state.power_on_date_value = pd.Timestamp("2027-01-15").date()
-if "prev_ntp_date_value" not in st.session_state:
-    st.session_state.prev_ntp_date_value = st.session_state.ntp_date_value
-if "prev_power_on_date_value" not in st.session_state:
-    st.session_state.prev_power_on_date_value = st.session_state.power_on_date_value
-
 st.title("CADC Schedule Simulator")
 st.markdown(
     "<div style='font-size:0.72rem; color:#7b86ad; margin-top:-0.2rem; margin-bottom:0.45rem;'>v0.2.0</div>",
@@ -527,8 +515,6 @@ with st.sidebar:
 
     esa_use  = st.checkbox("Use ESA")
     esa_date = st.date_input("ESA", value=pd.Timestamp("2027-03-01")) if esa_use else None
-    st.divider()
-    st.caption("Adjust high-level assumptions here. Keep detailed edits in collapsed controls.")
 
     st.divider()
     st.caption("Adjust high-level assumptions here. Detailed edits in the collapsed controls.")
