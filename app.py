@@ -169,16 +169,16 @@ PHASE_ORDER = [
 ]
 
 CADC_ROLLUP_MAP = {
-    "Design":            "Phase 3A",
-    "Permitting":        "Phase 3A",
-    "Site Power":        "Power",
-    "OFCI Procurement":  "OFCI Production",
-    "Civil":             "Phase 3B",
-    "Shell":             "Phase 3B",
-    "Equipment Yard":    "Phase 3B",
-    "MEP Fitup":         "Phase 3B",
-    "Commissioning":     "Phase 3B",
-    "Tenant Fitout":     "Phase 4",
+    "Design": "Phase 3A",
+    "Permitting": "Phase 3A",
+    "Site Power": "Power",
+    "OFCI Procurement": "OFCI Procurement",
+    "Civil": "Phase 3B",
+    "Shell": "Phase 3B",
+    "Equipment Yard": "Phase 3B",
+    "MEP Fitup": "Phase 3B",
+    "Commissioning": "Phase 3B",
+    "Tenant Fitout": "Phase 4",
 }
 
 KPI_MILESTONES = [
@@ -245,6 +245,9 @@ def build_gantt(current_df: pd.DataFrame, datahall_rfs: pd.DataFrame | None = No
         return COLOR_NONCRITICAL
 
     colors = df.apply(bar_color, axis=1).tolist()
+
+    df["DurationDays"] = (df["Finish"] - df["Start"]).dt.days.clip(lower=0)
+    df["DurationMs"] = (df["Finish"] - df["Start"]).dt.total_seconds() * 1000
 
     df["DurationDays"] = (df["Finish"] - df["Start"]).dt.days.clip(lower=0)
     df["DurationMs"] = (df["Finish"] - df["Start"]).dt.total_seconds() * 1000
@@ -436,6 +439,15 @@ if "prev_ntp_date_value" not in st.session_state:
 if "prev_power_on_date_value" not in st.session_state:
     st.session_state.prev_power_on_date_value = st.session_state.power_on_date_value
 
+if "ntp_date_value" not in st.session_state:
+    st.session_state.ntp_date_value = pd.Timestamp("2026-01-01").date()
+if "power_on_date_value" not in st.session_state:
+    st.session_state.power_on_date_value = pd.Timestamp("2027-01-15").date()
+if "prev_ntp_date_value" not in st.session_state:
+    st.session_state.prev_ntp_date_value = st.session_state.ntp_date_value
+if "prev_power_on_date_value" not in st.session_state:
+    st.session_state.prev_power_on_date_value = st.session_state.power_on_date_value
+
 st.title("CADC Schedule Simulator")
 st.markdown("<div style='font-size:0.72rem; color:#7b86ad; margin-top:-0.2rem; margin-bottom:0.45rem;'>v0.1.0</div>", unsafe_allow_html=True)
 
@@ -545,14 +557,18 @@ with st.sidebar:
 with st.expander("Editing Controls", expanded=False):
     st.markdown('<div class="section-title">Phase Inputs</div>', unsafe_allow_html=True)
     prior_phases = st.session_state.phases.copy()
+    prior_phases["Start"] = pd.to_datetime(prior_phases["Start"], errors="coerce")
+    prior_phases["DurationDays"] = pd.to_numeric(prior_phases["DurationDays"], errors="coerce").fillna(0).astype(int)
+    prior_phases["Finish"] = prior_phases["Start"] + pd.to_timedelta(prior_phases["DurationDays"], unit="D")
     edited_phases = st.data_editor(
         prior_phases,
+        key="phase_inputs_editor",
         width="stretch",
         hide_index=True,
         column_config={
             "Phase": st.column_config.TextColumn("Phase", disabled=True),
             "Start": st.column_config.DateColumn("Start"),
-            "Finish": st.column_config.DateColumn("Finish"),
+            "Finish": st.column_config.DateColumn("Finish", disabled=True),
             "DurationDays": st.column_config.NumberColumn("Duration (days)", step=1),
             "Enabled": st.column_config.CheckboxColumn("Enabled"),
         },
@@ -600,6 +616,7 @@ with st.expander("Editing Controls", expanded=False):
     st.markdown('<div class="section-title">Data Hall Inputs</div>', unsafe_allow_html=True)
     edited_dh = st.data_editor(
         st.session_state.dh_table,
+        key="datahall_inputs_editor",
         width="stretch",
         hide_index=True,
         num_rows="dynamic",
